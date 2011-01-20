@@ -1,0 +1,52 @@
+<?php
+// $Id$
+
+/**
+ * @file RESTful web services module.
+ */
+
+/**
+ * Returns info about all defined resources.
+ */
+function restws_get_resource_info() {
+  $info = &drupal_static(__FUNCTION__);
+  if (!isset($info)) {
+    $info = module_invoke_all('restws_resource_info');
+    drupal_alter($info);
+  }
+  return $info;
+}
+
+/**
+ * Implements hook_restws_resource_info().
+ *
+ * Provides resources for all entity types.
+ */
+function restws_restws_resource_info() {
+  foreach (entity_get_type() as $type => $info) {
+    $result[$entity_type] = array(
+      'label' => $info['label'],
+      'class' => 'RestWSEntityResourceController',
+    );
+  }
+  return $result;
+}
+
+/**
+ * Returns a instance of a resource controller.
+ *
+ * @return RestWSEntityResourceController
+ */
+function restws_resource_controller($name) {
+  $static = &drupal_static(__FUNCTION__);
+  if (!isset($static[$name])) {
+    $info = restws_restws_resource_info();
+    $static[$name] = new $info['name']['class']($name, $info);
+  }
+  return $static[$name];
+}
+
+
+
+
+
