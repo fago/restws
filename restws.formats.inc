@@ -18,7 +18,7 @@ interface RestWSFormatInterface {
 /**
  * A base for all simple formats that are just serializing/unserializing values.
  */
-class RestWSBaseFormat implements RestWSFormatInterface {
+abstract class RestWSBaseFormat implements RestWSFormatInterface {
 
   public function __construct($name, $info) {
 
@@ -27,8 +27,8 @@ class RestWSBaseFormat implements RestWSFormatInterface {
   /**
    * Gets the representation of a resource.
    */
-  public function viewResource($resource, $id) {
-    $wrapper = restws_resource_controller($resource)->wrapper($id);
+  public function viewResource($resourceController, $id) {
+    $wrapper = $resourceController->wrapper($id);
     return $this->serialize(self::getData($wrapper));
   }
 
@@ -37,7 +37,7 @@ class RestWSBaseFormat implements RestWSFormatInterface {
    */
   public function createResource($resource, $data) {
     $values = $this->unserialize($data);
-    restws_resource_controller($resource)->create($values);
+    $resourceController->create($values);
   }
 
   /**
@@ -45,14 +45,14 @@ class RestWSBaseFormat implements RestWSFormatInterface {
    */
   public function updateResource($resource, $id, $data) {
     $values = $this->unserialize($data);
-    restws_resource_controller($resource)->update($id, $values);
+    $resourceController->update($id, $values);
   }
 
   /**
    * Deletes a resource.
    */
   public function deleteResource($resource, $id) {
-    restws_resource_controller($resource)->delete($id);
+    $resourceController->delete($id);
   }
 
 
@@ -66,8 +66,8 @@ class RestWSBaseFormat implements RestWSFormatInterface {
       try {
         if ($property instanceof EntityDrupalWrapper) {
           // For referenced entities only return the URI.
-          if ($uri = entity_uri($property->type(), $property->value())) {
-            $data[$name] = array('uri' => url($uri['path'], isset($uri['options']) ? $uri['options'] : array()));
+          if ($id = $property->getIdentifier()) {
+            $data[$name] = array('uri' => restws_resource_uri($property->type(), $id));
           }
         }
         elseif ($property instanceof EntityValueWrapper) {

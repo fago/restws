@@ -12,7 +12,7 @@ function restws_get_resource_info() {
   $info = &drupal_static(__FUNCTION__);
   if (!isset($info)) {
     $info = module_invoke_all('restws_resource_info');
-    drupal_alter($info);
+    drupal_alter('restws_resource_info', $info);
   }
   return $info;
 }
@@ -23,8 +23,8 @@ function restws_get_resource_info() {
 function restws_get_format_controller_info() {
   $info = &drupal_static(__FUNCTION__);
   if (!isset($info)) {
-    $info = module_invoke_all('restws_format_info');
-    drupal_alter($info);
+    $info = module_invoke_all('restws_format_controller_info');
+    drupal_alter('restws_format_controller_info', $info);
   }
   return $info;
 }
@@ -35,7 +35,7 @@ function restws_get_format_controller_info() {
  * Provides resources for all entity types.
  */
 function restws_restws_resource_info() {
-  foreach (entity_get_type() as $type => $info) {
+  foreach (entity_get_info() as $entity_type => $info) {
     $result[$entity_type] = array(
       'label' => $info['label'],
       'class' => 'RestWSEntityResourceController',
@@ -53,7 +53,7 @@ function restws_resource_controller($name) {
   $static = &drupal_static(__FUNCTION__);
   if (!isset($static[$name])) {
     $info = restws_restws_resource_info();
-    $static[$name] = new $info['name']['class']($name, $info);
+    $static[$name] = isset($info[$name]) ? new $info[$name]['class']($name, $info) : FALSE;
   }
   return $static[$name];
 }
@@ -67,7 +67,7 @@ function restws_restws_format_controller_info() {
   return array(
     'json' => array(
       'label' => t('JSON'),
-      'class' => RestWSFormatJSON,
+      'class' => 'RestWSFormatJSON',
     ),
   );
 }
@@ -80,8 +80,8 @@ function restws_restws_format_controller_info() {
 function restws_format_controller($name) {
   $static = &drupal_static(__FUNCTION__);
   if (!isset($static[$name])) {
-    $info = restws_restws_format_info();
-    $static[$name] = new $info['name']['class']($name, $info);
+    $info = restws_get_format_controller_info();
+    $static[$name] = isset($info[$name]) ? new $info[$name]['class']($name, $info) : FALSE;
   }
   return $static[$name];
 }
@@ -92,18 +92,19 @@ function restws_format_controller($name) {
  * @param $op
  *   One of 'create', 'update', 'delete' or 'view'.
  */
-function restws_handle_request($op, $format_name, $resource, $id = NULL) {
-  if (restws_resource_controller($resource)->access($op, $id)) {
+function restws_handle_request($op, $format, $resource, $id = NULL) {
+  if (($resource = restws_resource_controller($resource)) && $resource->access($op, $id)) {
     try {
-      $format = restws_format_controller($format_name);
       $method = $op . 'Resource';
       print $format->$method($resource, $id);
     }
     catch (RestWSException $e) {
+      echo check_plain($e->getHTTPError());
       drupal_add_http_header('Status', $e->getHTTPError());
     }
   }
   else {
+    echo '403 Forbidden';
     drupal_add_http_header('Status', '403 Forbidden');
     watchdog('access denied', check_plain($_GET['q']), NULL, WATCHDOG_WARNING);
   }
@@ -114,9 +115,62 @@ function restws_handle_request($op, $format_name, $resource, $id = NULL) {
 /**
  * An exception defining the HTTP error code and message.
  */
-class RestWSException extends Exceptions {
+class RestWSException extends Exception {
 
   public function getHTTPError() {
     return '500 Internal Server Error';
   }
+}
+
+/**
+ * Implements hook_menu_alter().
+ */
+function restws_menu_alter(&$items) {
+  foreach (restws_get_resource_info() as $resource => $info) {
+    $menu_path = isset($info['menu_path']) ? $info['menu_path'] : $resource . '/%' . $resource;
+    if (isset($items[$menu_path])) {
+      // Preprend the page callback and the resource to the page arguments.
+      array_unshift($items[$menu_path]['page arguments'], $resource, $items[$menu_path]['page callback']);
+      $items[$menu_path]['page callback'] = 'restws_page_callback';
+    }
+    else {
+      $menu_path = isset($info['menu_path']) ? $info['menu_path'] : $resource . '/%';
+      $items[$menu_path] = array(
+        'page callback' => 'restws_page_callback',
+        'page arguments' => array($resource),
+        'access callback' => TRUE,
+      );
+    }
+  }
+}
+
+/**
+ * Menu page callback.
+ */
+function restws_page_callback($resource, $page_callback = NULL) {
+  // TODO: Look at Content type headers.
+
+  $id_arg = arg(1);
+  // Check for a appendend .format string.
+  if (($pos = strpos($id_arg, '.')) && $format_name = substr($id_arg, $pos + 1)) {
+    if ($format = restws_format_controller($format_name)) {
+      // TODO: determine op.
+      restws_handle_request('view', $format, $resource, substr($id_arg, 0, $pos));
+    }
+  }
+
+  // @todo: Determine wrong human readable URIs and redirect.
+  if (isset($page_callback)) {
+    // Further page callback arguments have been appended to our arguments.
+    $args = func_get_args();
+    return call_user_func_array($page_callback, array_slice($args, 2));
+  }
+}
+
+/**
+ * Returns the URI used for the given resource.
+ */
+function restws_resource_uri($resource, $id) {
+  // Avoid having the URLs aliased.
+  return url($resource . '/' . $id, array('absolute' => TRUE, 'alias' => TRUE));
 }
