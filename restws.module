@@ -18,6 +18,18 @@ function restws_get_resource_info() {
 }
 
 /**
+ * Returns info about all defined formats.
+ */
+function restws_get_format_controller_info() {
+  $info = &drupal_static(__FUNCTION__);
+  if (!isset($info)) {
+    $info = module_invoke_all('restws_format_info');
+    drupal_alter($info);
+  }
+  return $info;
+}
+
+/**
  * Implements hook_restws_resource_info().
  *
  * Provides resources for all entity types.
@@ -46,7 +58,65 @@ function restws_resource_controller($name) {
   return $static[$name];
 }
 
+/**
+ * Implements hook_restws_format_controller_info().
+ *
+ * Provides basic formats.
+ */
+function restws_restws_format_controller_info() {
+  return array(
+    'json' => array(
+      'label' => t('JSON'),
+      'class' => RestWSFormatJSON,
+    ),
+  );
+}
 
+/**
+ * Returns a instance of a format.
+ *
+ * @return RestWSEntityResourceController
+ */
+function restws_format_controller($name) {
+  $static = &drupal_static(__FUNCTION__);
+  if (!isset($static[$name])) {
+    $info = restws_restws_format_info();
+    $static[$name] = new $info['name']['class']($name, $info);
+  }
+  return $static[$name];
+}
 
+/**
+ * Handles a request.
+ *
+ * @param $op
+ *   One of 'create', 'update', 'delete' or 'view'.
+ */
+function restws_handle_request($op, $format_name, $resource, $id = NULL) {
+  if (restws_resource_controller($resource)->access($op, $id)) {
+    try {
+      $format = restws_format_controller($format_name);
+      $method = $op . 'Resource';
+      print $format->$method($resource, $id);
+    }
+    catch (RestWSException $e) {
+      drupal_add_http_header('Status', $e->getHTTPError());
+    }
+  }
+  else {
+    drupal_add_http_header('Status', '403 Forbidden');
+    watchdog('access denied', check_plain($_GET['q']), NULL, WATCHDOG_WARNING);
+  }
+  drupal_page_footer();
+  exit;
+}
 
+/**
+ * An exception defining the HTTP error code and message.
+ */
+class RestWSException extends Exceptions {
 
+  public function getHTTPError() {
+    return '500 Internal Server Error';
+  }
+}
